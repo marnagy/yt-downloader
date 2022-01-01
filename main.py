@@ -4,9 +4,10 @@ from argparse import Namespace, ArgumentParser
 from sys import stderr
 import os
 import shutil
-#from pprint import pprint
+from pprint import pprint
 from multiprocessing import cpu_count
 from typing import Iterable
+from enum import Enum
 
 # must download
 from pytube import YouTube, Stream, StreamQuery, Playlist
@@ -18,30 +19,57 @@ import requests
 import eyed3
 import eyed3.id3.frames
 
+class InvalidFormatException(Exception):
+	pass
+
+class Format(Enum):
+	Audio = 'audio'
+	Video = 'video'
+	Both = 'both'
+
+	@staticmethod
+	def to_format(s: str):
+		d = dict()
+		for format in Format:
+			d[format.name.lower()] = format
+		
+		if s in d:
+			return d[s]
+		else:
+			raise InvalidFormatException(f'Invalid format: {s}\nAvailable types: {list(map(lambda x: x.name, Format))}')
+
 def get_args() -> Namespace:
 	parser = ArgumentParser()
 
-	types = ['video', 'audio']
+	types = list(map(lambda x: x.name.lower(), Format))
 	parser.add_argument('-u', '--url', help='URL of a video/playlist', required=True)
-	parser.add_argument('-f', '--format', default='audio', help=f'{"/".join(types)} - default: audio')
+	parser.add_argument('-f', '--format', type=Format.to_format, default=Format.Audio, help=f'{"/".join(types)} - default: audio')
 	parser.add_argument('-m', '--max_resolution', type=int, default=1080, help='Maximal resolution to download. Used when \'-p\' flag is NOT used.')
-	parser.add_argument('-p', '--progressive', type=bool, default=False, nargs='?', const=True, help='Download video and audio together (max 720p, but faster)')
-	parser.add_argument('-d', '--development', type=bool, default=False, nargs='?', const=True, help='Enable development features.')
+
+	parser.add_argument('-p', '--progressive', dest='progressive', action='store_true', help='Download video and audio together (max 720p, but faster)')
+	parser.set_defaults(progressive=False)
+	#parser.add_argument('-p', '--progressive', type=bool, default=False, nargs='?', const=True, help='Download video and audio together (max 720p, but faster)')
+	parser.add_argument('-d', '--development', dest='development', action='store_true', help='Enable development features.')
+	parser.set_defaults(development=False)
+	#parser.add_argument('-d', '--development', type=bool, default=False, nargs='?', const=True, help='Enable development features.')
+
 	parser.add_argument('-t', '--threads', default=cpu_count() // 2, type=int, help=f'When using advanced video download, amount of threads to use for encoding the final video. Default: {cpu_count() // 2}')
 	parser.add_argument('-c', '--compress_level', type=int, default=5, help='Compression level [0-9]. Higher level of compression means it will take longer. Default: 5')
-	parser.add_argument('--add_metadata', type=bool, default=False, nargs='?', const=True, help='Add metadata (audio only).')
-	parser.add_argument('--max_bitrate', type=bool, default=False, nargs='?', const=True, help='Save the highest bitrate (audio only).')
+
+	parser.add_argument('--add_metadata', dest='add_metadata', action='store_true', help='Add metadata (audio only).')
+	parser.set_defaults(add_metadata=False)
+	parser.add_argument('--max_bitrate', dest='max_bitrate', action='store_true', help='Save the highest bitrate (audio only).')
+	parser.set_defaults(max_bitrate=False)
+
 	parser.add_argument('--artist', type=str, default=None, help='Add artist metadata')
 	parser.add_argument('--album', type=str, default=None, help='Add album metadata')
 	parser.add_argument('--title', type=str, default=None, help='Add song title metadata')
 	#parser.add_argument('--track', type=int, default= -1, help='Add track number metadata')
-	parser.add_argument('-s', '--silent', type=bool, default=False, nargs='?', const=True)
+	parser.add_argument('-s', '--silent', dest='silent', action='store_true')
+	parser.set_defaults(silent=False)
+	#parser.add_argument('-s', '--silent', type=bool, default=False, nargs='?', const=True)
 
 	args = parser.parse_args()
-
-	if args.format not in types:
-		print('Invalid format.', file=stderr)
-		exit(1)
 	
 	if not (0 <= args.compress_level and args.compress_level <= 9):
 		print(f'Invalid compress level ({args.compress_level}). Use --help for more information.', file=stderr)
@@ -110,7 +138,6 @@ def remove_forbidden(s: str) -> str:
 def on_progress_callback(_, chunk: bytes, bytes_remaining: int, progress_bar: tqdm):
 	progress_bar.update(len(chunk))
 
-
 def download_video(args: Namespace, yt: YouTube):
 	'''
 	Download video according to the arguments.
@@ -134,14 +161,15 @@ def main():
 		dir_name = f'playlist-{ remove_forbidden( playlist.title.replace(" ", "_") )}'
 
 		if os.path.exists(dir_name):
-			print(f'Directory "{dir_name}" already exists.')
-			resp = input('Do you want to remove its contents? [yes/no]\n')
-			if resp == 'yes':
-				os.chdir(dir_name)
-				for file in os.listdir():
-					os.remove(file)
-			else:
-				print('Leaving files in the directory.')
+			if len(os.listdir(dir_name)) > 0:
+				print(f'Directory "{dir_name}" already exists.')
+				resp = input('Do you want to remove its contents? [y/n]\n').lower()
+				if resp == 'y':
+					os.chdir(dir_name)
+					for file in os.listdir():
+						os.remove(file)
+			# else:
+			# 	print('Leaving files in the directory.')
 		else:
 			os.mkdir(dir_name)
 			os.chdir(dir_name)
@@ -155,6 +183,9 @@ def main():
 	try:
 		for yt in iterator:
 			yt: YouTube
+			if len(videos) > 1:
+				iterator.desc = f'Downloading {yt.title[:25]}'
+				iterator.update(n=0)
 			try:
 				all_streams = yt.streams
 			except MembersOnly: # video in the playlist is only for members of the channel
@@ -181,8 +212,8 @@ def main():
 						final_video_filename = 'final_video.mp4'
 						if verbose:
 							print('Merging video and audio...')
-						with VideoFileClip(video_file_path) as video_clip:
-							with AudioFileClip(audio_file_path) as audio_clip:
+						with VideoFileClip(video_file_path).subclip(0, 20) as video_clip:
+							with AudioFileClip(audio_file_path).subclip(0, 20) as audio_clip:
 								with video_clip.set_audio(audio_clip) as final_clip:
 									final_clip: VideoFileClip
 									compression_preset = get_compression_preset(args.compress_level)
@@ -204,8 +235,10 @@ def main():
 
 				# progressive -> video and audio are in one file together (max 720p)
 				else:
-					best_stream: Stream = all_streams.filter(type='video', progressive=True).order_by('resolution').last()
+					best_stream: Stream = all_streams.filter(type='video', progressive=True, subtype='mp4').order_by('resolution').last()
 					filename = remove_forbidden(yt.title + '.' + best_stream.mime_type.split('/')[1])
+					if filename in os.listdir():
+						continue
 					if verbose:
 						print(f'Downloading {yt.title}...', file=stderr)
 					best_stream.download(filename=filename)
@@ -221,8 +254,8 @@ def main():
 				out_filename = f'{out_base}.{out_ext}'
 				out_final = f'{out_base}.mp3'
 				#out_filename = remove_forbidden(out_filename) 
-				# if out_final in os.listdir():
-				# 	continue
+				if out_final in os.listdir():
+					continue
 				
 				stream.download(filename=out_filename)			
 				
