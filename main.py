@@ -4,7 +4,7 @@ from argparse import Namespace, ArgumentParser
 from sys import stderr
 import os
 import shutil
-from pprint import pprint
+# from pprint import pprint
 from multiprocessing import cpu_count
 from typing import Iterable
 from enum import Enum
@@ -15,6 +15,7 @@ from pytube.exceptions import MembersOnly
 from moviepy.editor import AudioFileClip, VideoFileClip
 from tqdm import tqdm
 import requests
+
 # pip only
 import eyed3
 import eyed3.id3.frames
@@ -42,12 +43,16 @@ def get_args() -> Namespace:
 	parser = ArgumentParser()
 
 	types = list(map(lambda x: x.name.lower(), Format))
-	parser.add_argument('-u', '--url', help='URL of a video/playlist', required=True)
+	group = parser.add_mutually_exclusive_group(required=True)
+	group.add_argument('-u', '--url', help='URL of a video')
+	group.add_argument('-p', '--playlist', help='URL of a playlist')
+
+
 	parser.add_argument('-f', '--format', type=Format.to_format, default=Format.Audio, help=f'{"/".join(types)} - default: audio')
 	parser.add_argument('-m', '--max_resolution', type=int, default=1080, help='Maximal resolution to download. Used when \'-p\' flag is NOT used.')
 
-	parser.add_argument('-p', '--progressive', dest='progressive', action='store_true', help='Download video and audio together (max 720p, but faster)')
-	parser.set_defaults(progressive=False)
+	#parser.add_argument('-p', '--progressive', dest='progressive', action='store_true', help='Download video and audio together (max 720p, but faster)')
+	parser.set_defaults(progressive=True)
 	#parser.add_argument('-p', '--progressive', type=bool, default=False, nargs='?', const=True, help='Download video and audio together (max 720p, but faster)')
 	parser.add_argument('-d', '--development', dest='development', action='store_true', help='Enable development features.')
 	parser.set_defaults(development=False)
@@ -131,7 +136,7 @@ def remove_forbidden(s: str) -> str:
 	for symbol in forbidden_symbols:
 		s = s.replace(symbol, '_')
 	
-	s = ''.join(filter(lambda symbol: ord(symbol) <= 127, s))
+	s = ''.join(map(lambda symbol: symbol if ord(symbol) <= 127 else '_', s))
 	
 	return s
 
@@ -153,30 +158,37 @@ def download_audio(args: Namespace, yt: YouTube):
 def main():
 	args = get_args()
 
-	playlist = Playlist(args.url)
-
 	videos: list[YouTube] = None
-	try:
-		print(f'Downloading playlist: {playlist.title}', file=stderr)
-		dir_name = f'playlist-{ remove_forbidden( playlist.title.replace(" ", "_") )}'
+	if args.playlist is not None:
+		try:
+			playlist = Playlist(args.playlist)
+			print(f'Downloading playlist: {playlist.title}', file=stderr)
+			dir_name = f'playlist-{ remove_forbidden( playlist.title.replace(" ", "_") )}'
 
-		if os.path.exists(dir_name):
-			if len(os.listdir(dir_name)) > 0:
-				print(f'Directory "{dir_name}" already exists.')
-				resp = input('Do you want to remove its contents? [y/n]\n').lower()
-				if resp == 'y':
-					os.chdir(dir_name)
-					for file in os.listdir():
-						os.remove(file)
-			# else:
-			# 	print('Leaving files in the directory.')
-		else:
-			os.mkdir(dir_name)
-			os.chdir(dir_name)
+			if os.path.exists(dir_name):
+				os.chdir(dir_name)
+				if len(os.listdir()) > 0:
+					print(f'Directory "{dir_name}" already exists.')
+					resp = input('Do you want to remove its contents? [y/n]\n').lower()
+					if resp == 'y':
+						for file in os.listdir():
+							os.remove(file)
+				# else:
+				# 	print('Leaving files in the directory.')
+			else:
+				os.mkdir(dir_name)
+				os.chdir(dir_name)
 
-		videos = list(playlist.videos)
-	except KeyError:
-		videos = [YouTube(args.url)]
+			videos = list(playlist.videos)
+		except:
+			print(f'Failed to download media from {args.playlist}', file=stderr)
+			exit(1)
+	if args.url:
+		try:
+			videos = [YouTube(args.url)]
+		except:
+			print(f'Failed to download media from {args.url}', file=stderr)
+			exit(1)
 
 	verbose: bool = not args.silent and len(videos) == 1
 	iterator: Iterable = tqdm(videos, ascii=True) if len(videos) > 1 else videos
@@ -184,15 +196,15 @@ def main():
 		for yt in iterator:
 			yt: YouTube
 			if len(videos) > 1:
-				iterator.desc = f'Downloading {yt.title[:25]}'
-				iterator.update(n=0)
+				iterator.desc = f'{yt.title[:35]}'
+				iterator.refresh()
 			try:
 				all_streams = yt.streams
 			except MembersOnly: # video in the playlist is only for members of the channel
 				continue
 
-			if args.format == 'video':
-				if not args.progressive:
+			if args.format in [Format.Video, Format.Both]:
+				if args.development:
 					if not args.development or len(videos) > 1:
 						print('This part is currently under development. Please, use flag -p to download a single file with both audio and video (upto 720p).', file=stderr)
 						#print('Failed to download.', file=stderr)
@@ -212,8 +224,8 @@ def main():
 						final_video_filename = 'final_video.mp4'
 						if verbose:
 							print('Merging video and audio...')
-						with VideoFileClip(video_file_path).subclip(0, 20) as video_clip:
-							with AudioFileClip(audio_file_path).subclip(0, 20) as audio_clip:
+						with VideoFileClip(video_file_path) as video_clip:
+							with AudioFileClip(audio_file_path) as audio_clip:
 								with video_clip.set_audio(audio_clip) as final_clip:
 									final_clip: VideoFileClip
 									compression_preset = get_compression_preset(args.compress_level)
@@ -242,8 +254,8 @@ def main():
 					if verbose:
 						print(f'Downloading {yt.title}...', file=stderr)
 					best_stream.download(filename=filename)
-			elif args.format == 'audio':
-				stream = all_streams.filter(type='audio').order_by('abr').last()
+			if args.format in [Format.Audio, Format.Both]:
+				stream = all_streams.filter(type='audio', subtype='webm').order_by('abr').last()
 				stream: Stream
 
 				if verbose:
@@ -289,10 +301,9 @@ def main():
 
 					audio_file = eyed3.load(out_final)
 
-					#audio_file.initTag(version=(2, 3, 0))  # version is important for thumbnail
+					audio_file.initTag(version=(2, 3, 0))  # version is important for thumbnail
 
-					tag = audio_file.tag
-					tag: eyed3.core.Tag
+					tag: eyed3.core.Tag = audio_file.tag
 
 					if 'Artist' in yt_metadata:
 						tag.artist = yt_metadata['Artist']
