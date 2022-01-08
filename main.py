@@ -163,7 +163,7 @@ def main():
 		try:
 			playlist = Playlist(args.playlist)
 			print(f'Downloading playlist: {playlist.title}', file=stderr)
-			dir_name = f'playlist-{ remove_forbidden( playlist.title.replace(" ", "_") )}'
+			dir_name = f'playlist-{ remove_forbidden( playlist.title.replace(" ", "_") ) }'
 
 			if os.path.exists(dir_name):
 				os.chdir(dir_name)
@@ -266,19 +266,17 @@ def main():
 				out_filename = f'{out_base}.{out_ext}'
 				out_final = f'{out_base}.mp3'
 				#out_filename = remove_forbidden(out_filename) 
-				if out_final in os.listdir():
-					continue
-				
-				stream.download(filename=out_filename)			
-				
-				# fix file metadata
-				with AudioFileClip(out_filename) as audio_clip:
-					loggerType = 'bar' if verbose else None
-					# remove "bps" from "160kbps" for ffmpeg
-					bitrate = f'{stream.abr[:-3]}' if args.max_bitrate else None
-					audio_clip.write_audiofile(out_final, nbytes=4, bitrate=bitrate, logger=loggerType)
-					#audio_clip.write_audiofile(out_final, logger=None)
-				os.remove(out_filename)
+				if out_final not in os.listdir():				
+					stream.download(filename=out_filename)			
+					
+					# fix file metadata
+					with AudioFileClip(out_filename) as audio_clip:
+						loggerType = 'bar' if verbose else None
+						# remove "bps" from "160kbps" for ffmpeg
+						bitrate = f'{stream.abr[:-3]}' if args.max_bitrate else None
+						audio_clip.write_audiofile(out_final, nbytes=4, bitrate=bitrate, logger=loggerType)
+						#audio_clip.write_audiofile(out_final, logger=None)
+					os.remove(out_filename)
 
 				if (args.add_metadata or args.artist 
 					or args.title or args.album):
