@@ -61,10 +61,10 @@ def get_args() -> Namespace:
 	parser.add_argument('-t', '--threads', default=cpu_count() // 2, type=int, help=f'When using advanced video download, amount of threads to use for encoding the final video. Default: {cpu_count() // 2}')
 	parser.add_argument('-c', '--compress_level', type=int, default=5, help='Compression level [0-9]. Higher level of compression means it will take longer. Default: 5')
 
-	parser.add_argument('--add_metadata', dest='add_metadata', action='store_true', help='Add metadata (audio only).')
-	parser.set_defaults(add_metadata=False)
-	parser.add_argument('--max_bitrate', dest='max_bitrate', action='store_true', help='Save the highest bitrate (audio only).')
-	parser.set_defaults(max_bitrate=False)
+	parser.add_argument('--exclude_metadata', dest='add_metadata', action='store_false', help='Exclude metadata (audio only).')
+	parser.set_defaults(add_metadata=True)
+	# parser.add_argument('--max_bitrate', dest='max_bitrate', action='store_true', help='Save the highest bitrate (audio only).')
+	# parser.set_defaults(max_bitrate=False)
 
 	parser.add_argument('--artist', type=str, default=None, help='Add artist metadata')
 	parser.add_argument('--album', type=str, default=None, help='Add album metadata')
@@ -218,10 +218,11 @@ def main():
 					os.mkdir(str(current_process_id))
 					os.chdir(str(current_process_id))
 					try:
-						video_file_path = download_video_part(all_streams.filter(type='video').order_by('resolution'), args.max_resolution, verbose)
 						audio_file_path = download_audio_part(all_streams.filter(type='audio'), verbose)
+						video_file_path = download_video_part(all_streams.filter(type='video', subtype='mp4').order_by('resolution'), args.max_resolution, verbose)
 
-						final_video_filename = 'final_video.mp4'
+						title = remove_forbidden(yt.title)
+						final_video_filename = f'{title}.mp4'
 						if verbose:
 							print('Merging video and audio...')
 						with VideoFileClip(video_file_path) as video_clip:
@@ -229,12 +230,11 @@ def main():
 								with video_clip.set_audio(audio_clip) as final_clip:
 									final_clip: VideoFileClip
 									compression_preset = get_compression_preset(args.compress_level)
-									final_clip.write_videofile(final_video_filename,
+									final_clip.write_videofile(final_video_filename, codec="h264_nvenc",
 										threads=args.threads, preset=compression_preset, logger='bar' if verbose else None)
 
-						title = remove_forbidden(yt.title)
 						
-						shutil.move(final_video_filename, os.path.join('..', title + '.mp4'))
+						shutil.move(final_video_filename, os.pardir)
 						if verbose:
 							print('Done.')
 					except KeyboardInterrupt:
@@ -243,7 +243,7 @@ def main():
 					# 	print(f'The following error occurred:\n{e}', file=stderr)
 					finally:
 						os.chdir('..')
-						shutil.rmtree( str(current_process_id) )			
+						shutil.rmtree( str(current_process_id) )
 
 				# progressive -> video and audio are in one file together (max 720p)
 				else:
@@ -266,14 +266,14 @@ def main():
 				out_filename = f'{out_base}.{out_ext}'
 				out_final = f'{out_base}.mp3'
 				#out_filename = remove_forbidden(out_filename) 
-				if out_final not in os.listdir():				
-					stream.download(filename=out_filename)			
+				if out_final not in os.listdir():
+					stream.download(filename=out_filename)
 					
 					# fix file metadata
 					with AudioFileClip(out_filename) as audio_clip:
 						loggerType = 'bar' if verbose else None
 						# remove "bps" from "160kbps" for ffmpeg
-						bitrate = f'{stream.abr[:-3]}' if args.max_bitrate else None
+						bitrate = f'{stream.abr[:-3]}'
 						audio_clip.write_audiofile(out_final, nbytes=4, bitrate=bitrate, logger=loggerType)
 						#audio_clip.write_audiofile(out_final, logger=None)
 					os.remove(out_filename)
