@@ -5,6 +5,7 @@ from sys import stderr
 import os
 import shutil
 # from pprint import pprint
+from time import sleep
 from multiprocessing import cpu_count
 from typing import Iterable
 from enum import Enum
@@ -205,14 +206,14 @@ def main():
 
 			if args.format in [Format.Video, Format.Both]:
 				if args.development:
-					if not args.development or len(videos) > 1:
+					if not args.development: # or len(videos) > 1:
 						print('This part is currently under development. Please, use flag -p to download a single file with both audio and video (upto 720p).', file=stderr)
 						#print('Failed to download.', file=stderr)
 						exit(1)
 
-					current_process_id = os.getpid()
+					current_process_id = f'{os.getpid()}_{remove_forbidden(yt.title)}'
 					if verbose:
-						print(f'Current proccess id: {current_process_id}')
+						print(f'Creating temporary directory: {current_process_id}')
 
 					# save to temporary directory
 					os.mkdir(str(current_process_id))
@@ -242,6 +243,7 @@ def main():
 					# except Exception as e:
 					# 	print(f'The following error occurred:\n{e}', file=stderr)
 					finally:
+						sleep(1)
 						os.chdir('..')
 						shutil.rmtree( str(current_process_id) )
 
@@ -273,7 +275,7 @@ def main():
 					with AudioFileClip(out_filename) as audio_clip:
 						loggerType = 'bar' if verbose else None
 						# remove "bps" from "160kbps" for ffmpeg
-						bitrate = f'{stream.abr[:-3]}'
+						bitrate = '256k' # f'{stream.abr[:-3]}'
 						audio_clip.write_audiofile(out_final, nbytes=4, bitrate=bitrate, logger=loggerType)
 						#audio_clip.write_audiofile(out_final, logger=None)
 					os.remove(out_filename)
@@ -315,17 +317,27 @@ def main():
 
 					if 'Album' in yt_metadata:
 						tag.album = yt_metadata['Album']
+					else:
+						tag.album = yt.title
 
 					if verbose:
 						print('Downloading thumbnail...')
 					resp = requests.get(yt.thumbnail_url, stream=True)
 					if resp.status_code == 200:
-						tag.images.set(eyed3.id3.frames.ImageFrame.FRONT_COVER, resp.content, 'image/jpeg')
-						#tag.images.set(3, resp.content, 'image/jpeg')
+						#print(resp.headers)
+						#tag.images.set(eyed3.id3.frames.ImageFrame.FRONT_COVER, resp.content, 'image/jpeg')
+						cover_img = resp.content
+						# with open(f'{ remove_forbidden(yt.title) }_cover.{ resp.headers["Content-Type"].split("/")[-1] }', 'bw') as cover_file:
+						# 	cover_file.write(cover_img)
+						tag.images.set(3, cover_img, 'image/jpg')
 						if verbose:
 							print('Thumbnail has been set.')
 
 					tag.save()
+		# if len(videos) > 1:
+		# 	for obj in os.listdir():
+		# 		if os.path.isdir(obj) and obj.startswith(f'{os.getpid()}'):
+		# 			shutil.rmtree(obj)
 	except KeyboardInterrupt:
 		print('Your download has been canceled.')
 		exit(1)
