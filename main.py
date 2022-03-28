@@ -20,8 +20,6 @@ import requests
 # pip only
 import eyed3
 import eyed3.id3.frames
-from pytypes import typechecked
-from rich.progress import track
 
 class InvalidFormatException(Exception):
 	pass
@@ -82,11 +80,9 @@ def get_args() -> Namespace:
 	
 	return args
 
-@typechecked
 def get_metadata(yt: YouTube) -> dict:
 	return yt.metadata.metadata[0] if len(yt.metadata.metadata) > 0 else dict()
 
-@typechecked
 def download_video_part(streams: StreamQuery, max_resolution: int, verbose: bool) -> str:
 	max_suitable_resolution = max(
 		filter(
@@ -116,7 +112,6 @@ def download_video_part(streams: StreamQuery, max_resolution: int, verbose: bool
 	res = best_video_stream.download()
 	return res
 
-@typechecked
 def download_audio_part(streams: StreamQuery, verbose: bool) -> str:
 	
 	stream: Stream = streams.order_by('abr').desc().first()
@@ -126,13 +121,11 @@ def download_audio_part(streams: StreamQuery, verbose: bool) -> str:
 	res = stream.download()
 	return res
 
-@typechecked
 def get_compression_preset(compression_level: int) -> str:
 	presets = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast',
 		'medium', 'slow', 'slower', 'veryslow', 'placebo']
 	return presets[compression_level]
 
-@typechecked
 def remove_forbidden(s: str) -> str:
 	forbidden_symbols = list()
 	if sys.platform == 'win32':
@@ -145,12 +138,10 @@ def remove_forbidden(s: str) -> str:
 	
 	return s
 
-@typechecked
 def on_progress_callback(_, chunk: bytes, bytes_remaining: int, progress_bar: tqdm):
 	progress_bar.update(len(chunk))
 
-@typechecked
-def download_audio(args: Namespace, yt: YouTube, all_streams: StreamQuery, verbose: bool):
+def download_audio(args: Namespace, yt: YouTube, all_streams, verbose: bool):
 	'''
 	Download audio according to the arguments.
 	'''
@@ -232,7 +223,6 @@ def download_audio(args: Namespace, yt: YouTube, all_streams: StreamQuery, verbo
 
 		tag.save()
 
-@typechecked
 def download_video(args: Namespace, yt: YouTube, all_streams: StreamQuery, verbose: bool):
 	'''
 	Download video according to the arguments.
@@ -290,8 +280,8 @@ def download_video(args: Namespace, yt: YouTube, all_streams: StreamQuery, verbo
 			print(f'Downloading {yt.title}...', file=stderr)
 		best_stream.download(filename=filename)
 
-@typechecked
 def get_urls(args: Namespace) -> list[YouTube]:
+	videos: list[YouTube]
 	if args.playlist is not None:
 		try:
 			playlist = Playlist(args.playlist)
@@ -322,8 +312,8 @@ def get_urls(args: Namespace) -> list[YouTube]:
 		except:
 			print(f'Failed to download media from {args.url}', file=stderr)
 			exit(1)
+	return videos
 
-@typechecked
 def progress_update(iterator: Iterable, yt: YouTube):
 	iterator.desc = f'{yt.title[:35]}'
 	iterator.refresh()
@@ -331,7 +321,7 @@ def progress_update(iterator: Iterable, yt: YouTube):
 def main():
 	args = get_args()
 
-	videos: list[YouTube] = get_urls()
+	videos: list[YouTube] = get_urls(args)
 
 	verbose: bool = not args.silent and len(videos) == 1
 	iterator: Iterable = tqdm(videos, ascii=True) if len(videos) > 1 else videos
@@ -350,7 +340,11 @@ def main():
 			if args.format in [Format.Video, Format.Both]:
 				download_video(args, yt, all_streams, verbose)
 			if args.format in [Format.Audio, Format.Both]:
-				download_audio(args, yt)
+				download_audio(args, yt, all_streams, verbose)
+		# if len(videos) > 1:
+		# 	for obj in os.listdir():
+		# 		if os.path.isdir(obj) and obj.startswith(f'{os.getpid()}'):
+		# 			shutil.rmtree(obj)
 	except KeyboardInterrupt:
 		print('Your download has been canceled.')
 		exit(1)
