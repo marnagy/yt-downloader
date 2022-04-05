@@ -1,6 +1,7 @@
 certifi==2021.10.8
 charset-normalizer==2.0.11
 colorama==0.4.4
+commonmark==0.9.1
 coverage==5.5
 decorator==4.4.2
 deprecation==2.1.0
@@ -14,9 +15,12 @@ numpy==1.22.1
 packaging==21.3
 Pillow==9.0.0
 proglog==0.1.9
+Pygments==2.11.2
 pyparsing==3.0.7
-pytube==11.0.2
+pytube==12.0.0
+pytypes==1.0b10
 requests==2.27.1
+rich==12.0.1
 toml==0.10.2
 tqdm==4.62.3
 urllib3==1.26.8
