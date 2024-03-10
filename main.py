@@ -11,8 +11,10 @@ from typing import Iterable
 from enum import Enum
 
 # must download
+import pyperclip as pc
+import validators
 from pytube import YouTube, Stream, StreamQuery, Playlist
-from pytube.exceptions import MembersOnly
+from pytube.exceptions import MembersOnly, AgeRestrictedError
 from moviepy.editor import AudioFileClip, VideoFileClip
 from tqdm import tqdm
 import requests
@@ -45,9 +47,10 @@ def get_args() -> Namespace:
 
 	types = list(map(lambda x: x.name.lower(), Format))
 	group = parser.add_mutually_exclusive_group(required=True)
-	group.add_argument('-u', '--url', help='URL of a video')
+	group.add_argument('-u', '--url', nargs='+', help='URL of a video')
 	group.add_argument('-p', '--playlist', help='URL of a playlist')
-
+	group.add_argument('-c', '--clipboard', dest='clipboard', action='store_true', help='Extract URL from clipboard.')
+	group.set_defaults(clipboard=False)
 
 	parser.add_argument('-f', '--format', type=Format.to_format, default=Format.Audio, help=f'{"/".join(types)} - default: audio')
 	parser.add_argument('-m', '--max_resolution', type=int, default=1080, help='Maximal resolution to download. Used when \'-p\' flag is NOT used.')
@@ -57,10 +60,13 @@ def get_args() -> Namespace:
 	#parser.add_argument('-p', '--progressive', type=bool, default=False, nargs='?', const=True, help='Download video and audio together (max 720p, but faster)')
 	parser.add_argument('-d', '--development', dest='development', action='store_true', help='Enable development features.')
 	parser.set_defaults(development=False)
+
+	parser.add_argument('--single-progress-bar', dest='single_progress_bar', action='store_true', help='Only show one progress bar.')
+	parser.set_defaults(single_progress_bar=False)
 	#parser.add_argument('-d', '--development', type=bool, default=False, nargs='?', const=True, help='Enable development features.')
 
 	parser.add_argument('-t', '--threads', default=cpu_count() // 2, type=int, help=f'When using advanced video download, amount of threads to use for encoding the final video. Default: {cpu_count() // 2}')
-	parser.add_argument('-c', '--compress_level', type=int, default=5, help='Compression level [0-9]. Higher level of compression means it will take longer. Default: 5')
+	parser.add_argument('--compress_level', type=int, default=5, help='Compression level [0-9]. Higher level of compression means it will take longer. Default: 5')
 
 	parser.add_argument('--exclude_metadata', dest='add_metadata', action='store_false', help='Exclude metadata (audio only).')
 	parser.set_defaults(add_metadata=True)
@@ -77,6 +83,14 @@ def get_args() -> Namespace:
 	if not (0 <= args.compress_level and args.compress_level <= 9):
 		print(f'Invalid compress level ({args.compress_level}). Use --help for more information.', file=stderr)
 		exit(1)
+	
+	if args.clipboard:
+		url_from_clipboard = pc.paste()
+		if validators.url(url_from_clipboard):
+			setattr(args, 'url', [url_from_clipboard])
+		else:
+			print(f'URL from clipboard is not valid: "{url_from_clipboard}"')
+			exit(1)
 	
 	return args
 
@@ -141,7 +155,7 @@ def remove_forbidden(s: str) -> str:
 def on_progress_callback(_, chunk: bytes, bytes_remaining: int, progress_bar: tqdm):
 	progress_bar.update(len(chunk))
 
-def download_audio(args: Namespace, yt: YouTube, all_streams, verbose: bool):
+def download_audio(args: Namespace, yt: YouTube, all_streams, prefix: str = "", verbose: bool = True):
 	'''
 	Download audio according to the arguments.
 	'''
@@ -154,7 +168,7 @@ def download_audio(args: Namespace, yt: YouTube, all_streams, verbose: bool):
 	out_base = remove_forbidden(yt.title)
 	out_ext = stream.mime_type.split("/")[1]
 	out_filename = f'{out_base}.{out_ext}'
-	out_final = f'{out_base}.mp3'
+	out_final = f'{prefix}-{out_base}.mp3'
 	#out_filename = remove_forbidden(out_filename) 
 	if out_final not in os.listdir():
 		stream.download(filename=out_filename)
@@ -163,7 +177,7 @@ def download_audio(args: Namespace, yt: YouTube, all_streams, verbose: bool):
 		with AudioFileClip(out_filename) as audio_clip:
 			loggerType = 'bar' if verbose else None
 			# remove "bps" from "160kbps" for ffmpeg
-			bitrate = '256k' # f'{stream.abr[:-3]}'
+			bitrate = None # '256k' # f'{stream.abr[:-3]}'
 			audio_clip.write_audiofile(out_final, nbytes=4, bitrate=bitrate, logger=loggerType)
 			#audio_clip.write_audiofile(out_final, logger=None)
 		os.remove(out_filename)
@@ -308,7 +322,7 @@ def get_urls(args: Namespace) -> list[YouTube]:
 			exit(1)
 	if args.url:
 		try:
-			videos = [YouTube(args.url)]
+			videos = [ YouTube(url) for url in args.url ]
 		except:
 			print(f'Failed to download media from {args.url}', file=stderr)
 			exit(1)
@@ -323,24 +337,27 @@ def main():
 
 	videos: list[YouTube] = get_urls(args)
 
-	verbose: bool = not args.silent and len(videos) == 1
-	iterator: Iterable = tqdm(videos, ascii=True) if len(videos) > 1 else videos
+	verbose_cond = args.playlist is None
+	verbose: bool = not args.silent and verbose_cond and not args.single_progress_bar
+	iterator: Iterable = tqdm(enumerate(videos), ascii=True) if not verbose_cond else enumerate(videos)
 	try:
-		for yt in iterator:
+		for i, yt in iterator:
 			yt: YouTube
 			
-			if len(videos) > 1:
+			if not verbose_cond:
 				progress_update(iterator, yt)
 
 			try:
 				all_streams = yt.streams
 			except MembersOnly: # video in the playlist is only for members of the channel
 				continue
+			except AgeRestrictedError:
+				continue
 
 			if args.format in [Format.Video, Format.Both]:
 				download_video(args, yt, all_streams, verbose)
 			if args.format in [Format.Audio, Format.Both]:
-				download_audio(args, yt, all_streams, verbose)
+				download_audio(args, yt, all_streams, f"{i:03d}", verbose)
 		# if len(videos) > 1:
 		# 	for obj in os.listdir():
 		# 		if os.path.isdir(obj) and obj.startswith(f'{os.getpid()}'):
