@@ -168,7 +168,7 @@ def download_audio(args: Namespace, yt: YouTube, all_streams, prefix: str = "", 
 	out_base = remove_forbidden(yt.title)
 	out_ext = stream.mime_type.split("/")[1]
 	out_filename = f'{out_base}.{out_ext}'
-	out_final = f'{prefix}-{out_base}.mp3'
+	out_final = f'{prefix}{"-" if len(prefix) > 0 else ""}{out_base}.mp3'
 	#out_filename = remove_forbidden(out_filename) 
 	if out_final not in os.listdir():
 		stream.download(filename=out_filename)
@@ -357,7 +357,13 @@ def main():
 			if args.format in [Format.Video, Format.Both]:
 				download_video(args, yt, all_streams, verbose)
 			if args.format in [Format.Audio, Format.Both]:
-				download_audio(args, yt, all_streams, f"{i:03d}", verbose)
+				prefix = "" if args.playlist is None else f"{i:03d}"
+				download_audio(
+					args,
+					yt,
+					all_streams,
+					prefix,
+					verbose)
 		# if len(videos) > 1:
 		# 	for obj in os.listdir():
 		# 		if os.path.isdir(obj) and obj.startswith(f'{os.getpid()}'):
