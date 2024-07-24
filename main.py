@@ -14,7 +14,7 @@ from enum import Enum
 import pyperclip as pc
 import validators
 from pytube import YouTube, Stream, StreamQuery, Playlist
-from pytube.exceptions import MembersOnly, AgeRestrictedError
+from pytube.exceptions import MembersOnly, AgeRestrictedError, RegexMatchError
 from moviepy.editor import AudioFileClip, VideoFileClip
 from tqdm import tqdm
 import requests
@@ -159,7 +159,8 @@ def download_audio(args: Namespace, yt: YouTube, all_streams, prefix: str = "", 
 	'''
 	Download audio according to the arguments.
 	'''
-	stream = all_streams.filter(type='audio', subtype='webm').order_by('abr').last()
+	# stream = all_streams.filter(type='audio', subtype='webm').order_by('abr').last()
+	stream = all_streams.filter(type='audio').order_by('abr').last()
 	stream: Stream
 
 	if verbose:
@@ -339,7 +340,7 @@ def main():
 
 	verbose_cond = args.playlist is None
 	verbose: bool = not args.silent and verbose_cond and not args.single_progress_bar
-	iterator: Iterable = tqdm(enumerate(videos), ascii=True) if not verbose_cond else enumerate(videos)
+	iterator: Iterable = tqdm(enumerate(videos), ascii=True, total=len(videos)) if not verbose_cond else enumerate(videos)
 	try:
 		for i, yt in iterator:
 			yt: YouTube
@@ -352,6 +353,8 @@ def main():
 			except MembersOnly: # video in the playlist is only for members of the channel
 				continue
 			except AgeRestrictedError:
+				continue
+			except RegexMatchError:
 				continue
 
 			if args.format in [Format.Video, Format.Both]:
